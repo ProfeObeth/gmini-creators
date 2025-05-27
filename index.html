@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Generador de Imágenes para Colorear con IA</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f0f4f8; /* Light blue-gray background */
+        }
+        #imageCanvas {
+            display: block;
+            max-width: 100%;
+            height: auto;
+            background-color: #fff; /* White background for the canvas area */
+            border: 1px solid #e2e8f0; /* Light border for canvas */
+        }
+        .app-container {
+            min-height: 100vh;
+        }
+        /* Simple spinner */
+        .spinner {
+            border: 4px solid rgba(0, 0, 0, 0.1);
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            border-left-color: #09f;
+            animation: spin 1s ease infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="flex items-center justify-center py-8 app-container">
+
+    <div id="app" class="container mx-auto p-4 sm:p-6 md:p-8 flex flex-col items-center bg-white rounded-xl shadow-2xl w-full max-w-2xl">
+        <header class="mb-8 text-center">
+            <h1 class="text-3xl sm:text-4xl font-bold text-gray-800">Generador de Imágenes para Colorear con IA</h1>
+            <p class="text-gray-600 mt-2">Describe la imagen que quieres crear y la IA la dibujará para ti.</p>
+        </header>
+
+        <div class="bg-gray-50 p-6 rounded-lg shadow-md w-full mb-6">
+            <label for="promptInput" class="block text-sm font-medium text-gray-700 mb-2">1. Describe tu imagen:</label>
+            <textarea id="promptInput" rows="3" class="block w-full text-sm text-gray-900 border border-gray-300 rounded-lg p-2.5 focus:ring-blue-500 focus:border-blue-500" placeholder="Ej: Un gato con sombrero volando en una escoba, estilo libro de colorear"></textarea>
+        </div>
+
+        <button id="generateImageBtn" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg shadow-md hover:shadow-lg transition-all duration-150 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed mb-6 text-lg">
+            2. Generar Imagen
+        </button>
+
+        <div id="loadingIndicator" class="hidden flex-col items-center justify-center mb-4">
+            <div class="spinner mb-2"></div>
+            <p class="text-gray-700 font-medium">Generando imagen, por favor espera...</p>
+        </div>
+        
+        <p id="statusMessage" class="text-gray-700 font-medium mb-4 h-5 text-center"></p>
+
+        <div class="w-full border-2 border-gray-300 rounded-lg overflow-hidden shadow-inner mb-6 bg-gray-100 min-h-[250px] sm:min-h-[300px] md:min-h-[400px] flex items-center justify-center p-1">
+            <canvas id="imageCanvas"></canvas>
+        </div>
+
+        <a id="downloadLink" href="#" class="hidden w-full text-center bg-green-500 hover:bg-green-600 text-white font-bold py-3 px-6 rounded-lg shadow-md hover:shadow-lg transition-all duration-150 ease-in-out text-lg">
+            3. Descargar Imagen
+        </a>
+    </div>
+
+    <script>
+        // Get DOM elements
+        const promptInput = document.getElementById('promptInput');
+        const generateImageBtn = document.getElementById('generateImageBtn');
+        const imageCanvas = document.getElementById('imageCanvas');
+        const ctx = imageCanvas.getContext('2d');
+        const downloadLink = document.getElementById('downloadLink');
+        const statusMessage = document.getElementById('statusMessage');
+        const loadingIndicator = document.getElementById('loadingIndicator');
+
+        // Event listener for the generation button
+        generateImageBtn.addEventListener('click', async () => {
+            const userPrompt = promptInput.value.trim();
+            if (!userPrompt) {
+                statusMessage.textContent = 'Por favor, describe la imagen que quieres generar.';
+                return;
+            }
+
+            statusMessage.textContent = '';
+            loadingIndicator.classList.remove('hidden');
+            generateImageBtn.disabled = true;
+            downloadLink.classList.add('hidden');
+            ctx.clearRect(0, 0, imageCanvas.width, imageCanvas.height); // Clear previous image
+
+            // Construct the prompt for the AI model
+            const aiPrompt = `A coloring book page of ${userPrompt}, black and white line art, clean lines, no shading, white background.`;
+
+            try {
+                // Prepare payload for the Gemini API (Imagen model)
+                const payload = {
+                    instances: [{ prompt: aiPrompt }],
+                    parameters: { sampleCount: 1 }
+                };
+                const apiKey = ""; // API key will be injected by the environment
+                const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:predict?key=${apiKey}`;
+
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    console.error('Error from API:', errorData);
+                    throw new Error(`Error de la API: ${errorData.error?.message || response.statusText}`);
+                }
+
+                const result = await response.json();
+
+                if (result.predictions && result.predictions.length > 0 && result.predictions[0].bytesBase64Encoded) {
+                    const base64ImageData = result.predictions[0].bytesBase64Encoded;
+                    const imageUrl = `data:image/png;base64,${base64ImageData}`;
+
+                    const img = new Image();
+                    img.onload = () => {
+                        // Set canvas dimensions to match the generated image
+                        // To maintain aspect ratio and fit within a max width/height:
+                        const maxWidth = imageCanvas.parentElement.clientWidth - 20; // Max width of container minus some padding
+                        const maxHeight = 500; // Arbitrary max height
+                        
+                        let newWidth = img.width;
+                        let newHeight = img.height;
+
+                        if (newWidth > maxWidth) {
+                            const ratio = maxWidth / newWidth;
+                            newWidth = maxWidth;
+                            newHeight = newHeight * ratio;
+                        }
+
+                        if (newHeight > maxHeight) {
+                            const ratio = maxHeight / newHeight;
+                            newHeight = maxHeight;
+                            newWidth = newWidth * ratio;
+                        }
+                        
+                        imageCanvas.width = newWidth;
+                        imageCanvas.height = newHeight;
+                        
+                        // Draw the generated image onto the canvas
+                        ctx.drawImage(img, 0, 0, newWidth, newHeight);
+
+                        // Prepare and show the download link
+                        downloadLink.href = imageCanvas.toDataURL('image/png');
+                        downloadLink.download = `colorear_${userPrompt.substring(0,20).replace(/\s+/g, '_')}.png`;
+                        downloadLink.classList.remove('hidden');
+                        statusMessage.textContent = '¡Tu imagen para colorear está lista!';
+                    };
+                    // Corrected the arrow function syntax below
+                    img.onerror = () => { 
+                        statusMessage.textContent = 'Error al cargar la imagen generada.';
+                        console.error('Error loading generated image into Image object.');
+                    }
+                    img.src = imageUrl;
+
+                } else {
+                    console.error('Respuesta inesperada de la API:', result);
+                    statusMessage.textContent = 'No se pudo generar la imagen. Respuesta inesperada.';
+                }
+
+            } catch (error) {
+                console.error("Error generando imagen:", error);
+                statusMessage.textContent = `Error: ${error.message || 'No se pudo generar la imagen.'}`;
+            } finally {
+                loadingIndicator.classList.add('hidden');
+                generateImageBtn.disabled = false;
+            }
+        });
+    </script>
+</body>
+</html>
